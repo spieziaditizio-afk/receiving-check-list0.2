@@ -34,6 +34,37 @@ App de estación: corre en el navegador de los PCs de la zona *receiving*. Pensa
 3. La conciliación es: **suma de piezas escaneadas (por caja) vs. total declarado en el packing list**, por cada combinación PO/Delivery/PN/COO.
 4. Un packing list puede repartirse en **varios pallets**; la app agrupa y segrega por pallet.
 
+## Modelo de datos y conciliación
+
+### Packing list (ingreso manual, jerárquico)
+El packing list se registra una vez respetando la jerarquía real:
+
+```
+PO
+└─ Delivery (1+ por PO)
+   └─ Línea: PN + COO + cantidad declarada (1+ por delivery)
+```
+
+Esto es lo que se concilia contra lo escaneado.
+
+### Dos niveles de "dato master"
+Los proveedores varían en qué datos imprimen en la etiqueta de caja. Para no preguntar campo por campo, se usan dos masters:
+
+1. **Scan profile (por proveedor)** — define *qué campos trae la etiqueta de caja* de ese proveedor. Casos típicos:
+   - **Completo:** PO, Delivery, PN, COO, qty (se escanea todo).
+   - **Habitual (mayoría):** PN + COO + qty (PO y Delivery se heredan del master).
+   - **Mínimo:** solo qty (el resto se hereda).
+
+   Se configura una vez por proveedor y queda como dato persistente.
+
+2. **Contexto del pallet** — como la regla es **1 PO + 1 Delivery + 1 PN + 1 COO por pallet**, esos 4 valores son constantes para todas las cajas del pallet. El trabajador los fija una vez (eligiéndolos del packing list ya cargado) y quedan fijos para ese pallet.
+
+### Lógica de escaneo por caja
+- **Solo se escanea lo que la etiqueta realmente trae.** Lo que no trae se **hereda del contexto del pallet**.
+- **La cantidad de piezas se escanea SIEMPRE** (es el núcleo de la conciliación).
+- **Validación:** si un campo *sí* viene en el barcode (p. ej. PN), se compara contra el master del pallet. Mismatch → alerta de **"caja en pallet equivocado"**. Si no viene, se rellena del master sin fricción.
+- **Principio:** escanear siempre que la etiqueta lo tenga; inferir del master solo lo que físicamente no está impreso. Cada campo heredado deja de verificarse por caja (se confía en el ordenado físico + la conciliación de piezas atrapa errores de cantidad).
+
 ## Stack y arquitectura
 
 - **React + Vite + TypeScript** (SPA). Sin backend por ahora — **app autónoma, ingreso manual de datos** (el packing list de papel se teclea/escanea). No hay integración con el WMS en esta fase.
@@ -47,7 +78,7 @@ App de estación: corre en el navegador de los PCs de la zona *receiving*. Pensa
 - **Limpieza de cantidades escaneadas:** las etiquetas de caja pueden traer la cantidad con **ceros a la izquierda y/o letras** (p. ej. `0000150`, `150PCS`, `PCS150`). La app debe **extraer el entero limpio** (→ `150`) antes de sumar.
 
 ### Conciliación
-- Comparar piezas escaneadas vs. packing list por PO/Delivery/PN/COO. Mostrar claramente **OK / faltante / sobrante**.
+- Comparar piezas escaneadas vs. packing list por PO/Delivery/PN/COO (ver **Modelo de datos y conciliación**). Mostrar claramente **OK / faltante / sobrante**.
 
 ### Salidas imprimibles (etiquetas ZPL)
 Dos tipos de "label ticket", impresos en la misma etiqueta física:
@@ -73,3 +104,4 @@ Dos tipos de "label ticket", impresos en la misma etiqueta física:
 - Cómo enviar el ZPL a la Zebra desde el navegador (driver de Windows + raw print, Zebra Browser Print, o endpoint local). **Confirmar antes de implementar la impresión.**
 - DPI exacto de las ZT en uso (203 vs 300) para dimensionar las plantillas.
 - Si se necesita persistir/historizar sesiones de verificación o basta con conciliación en vivo.
+- Si se precarga una **lista fija de proveedores con su scan profile ya conocido**, o el perfil se define la primera vez que aparece cada proveedor.
